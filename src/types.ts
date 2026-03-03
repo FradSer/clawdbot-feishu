@@ -83,4 +83,7 @@ export type DynamicAgentCreationConfig = {
   workspaceTemplate?: string;
   agentDirTemplate?: string;
   maxAgents?: number;
+  mode?: "default" | "secretary";
+  secretaryAgentDirTemplate?: string;
+  ignoredUsers?: string[];
 };

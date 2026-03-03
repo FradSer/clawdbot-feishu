@@ -68,6 +68,9 @@ const DynamicAgentCreationSchema = z
     workspaceTemplate: z.string().optional(),
     agentDirTemplate: z.string().optional(),
     maxAgents: z.number().int().positive().optional(),
+    mode: z.enum(["default", "secretary"]).optional(),
+    secretaryAgentDirTemplate: z.string().optional(),
+    ignoredUsers: z.array(z.string()).optional(),
   })
   .strict()
   .optional();

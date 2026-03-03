@@ -57,7 +57,43 @@ export async function maybeCreateDynamicAgent(params: {
   // Check if agent already exists (but binding was missing)
   const existingAgent = (cfg.agents?.list ?? []).find((a) => a.id === agentId);
   if (existingAgent) {
-    // Agent exists but binding doesn't - just add the binding
+    // Resolve the expected agentDir based on current mode
+    const targetAgentDir = resolveUserPath(
+      resolveAgentDirTemplate({ dynamicCfg, senderOpenId, agentId }),
+    );
+
+    // Check if agentDir needs updating (mode may have changed)
+    if (existingAgent.agentDir !== targetAgentDir) {
+      log(
+        `feishu: updating agent "${agentId}" agentDir from ${existingAgent.agentDir} to ${targetAgentDir}`,
+      );
+
+      // Update only the agentDir, preserve workspace
+      const updatedAgents = cfg.agents!.list.map((a) =>
+        a.id === agentId ? { ...a, agentDir: targetAgentDir } : a,
+      );
+
+      const updatedCfg: OpenClawConfig = {
+        ...cfg,
+        agents: { ...cfg.agents, list: updatedAgents },
+        bindings: [
+          ...existingBindings,
+          {
+            agentId,
+            match: {
+              channel: "feishu",
+              ...(accountId ? { accountId } : {}),
+              peer: { kind: "direct", id: senderOpenId },
+            },
+          },
+        ],
+      };
+
+      await runtime.config.writeConfigFile(updatedCfg);
+      return { created: true, updatedCfg, agentId };
+    }
+
+    // Agent exists with matching agentDir - just add the binding
     log(`feishu: agent "${agentId}" exists, adding missing binding for ${senderOpenId}`);
 
     const updatedCfg: OpenClawConfig = {
@@ -81,13 +117,12 @@ export async function maybeCreateDynamicAgent(params: {
 
   // Resolve path templates with substitutions
   const workspaceTemplate = dynamicCfg.workspaceTemplate ?? "~/.openclaw/workspace-{agentId}";
-  const agentDirTemplate = dynamicCfg.agentDirTemplate ?? "~/.openclaw/agents/{agentId}/agent";
 
   const workspace = resolveUserPath(
     workspaceTemplate.replace("{userId}", senderOpenId).replace("{agentId}", agentId),
   );
   const agentDir = resolveUserPath(
-    agentDirTemplate.replace("{userId}", senderOpenId).replace("{agentId}", agentId),
+    resolveAgentDirTemplate({ dynamicCfg, senderOpenId, agentId }),
   );
 
   log(`feishu: creating dynamic agent "${agentId}" for user ${senderOpenId}`);
@@ -122,6 +157,39 @@ export async function maybeCreateDynamicAgent(params: {
   await runtime.config.writeConfigFile(updatedCfg);
 
   return { created: true, updatedCfg, agentId };
+}
+
+/**
+ * Resolve the target agentDir based on mode configuration.
+ */
+function resolveAgentDirTemplate(params: {
+  dynamicCfg: DynamicAgentCreationConfig;
+  senderOpenId: string;
+  agentId: string;
+}): string {
+  const { dynamicCfg, senderOpenId, agentId } = params;
+
+  // Determine target mode
+  const mode = dynamicCfg.mode ?? "default";
+
+  // Check if user is ignored (only matters for secretary mode)
+  const ignoredUsers = dynamicCfg.ignoredUsers ?? [];
+  const isIgnoredUser = ignoredUsers.includes(senderOpenId);
+
+  // Resolve target template
+  if (mode === "secretary" && !isIgnoredUser) {
+    // Use secretary template with fallback
+    const template = dynamicCfg.secretaryAgentDirTemplate;
+    if (template) {
+      return template.replace("{userId}", senderOpenId).replace("{agentId}", agentId);
+    }
+    // Fallback to hardcoded default
+    return "~/.openclaw/agents/secretary/agent";
+  }
+
+  // Default mode or ignored user: use standard template
+  const template = dynamicCfg.agentDirTemplate ?? "~/.openclaw/agents/{agentId}/agent";
+  return template.replace("{userId}", senderOpenId).replace("{agentId}", agentId);
 }
 
 /**
